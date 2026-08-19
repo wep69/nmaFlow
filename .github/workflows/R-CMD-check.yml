@@ -1,0 +1,30 @@
+name: R-CMD-check
+on: [push, pull_request]
+jobs:
+  R-CMD-check:
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: windows-latest, r: 'release', args: 'c("--no-manual", "--as-cran", "--no-build-vignettes")'}
+          - {os: macos-latest,   r: 'release', args: 'c("--no-manual", "--as-cran", "--no-build-vignettes")'}
+          - {os: ubuntu-latest,   r: 'devel',   args: 'c("--no-manual", "--as-cran", "--no-build-vignettes")'}
+          - {os: ubuntu-latest,   r: 'release', args: 'c("--no-manual", "--as-cran")'}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with: { r-version: '${{ matrix.config.r }}', use-public-rspm: true }
+      - uses: r-lib/actions/setup-pandoc@v2
+      - name: Install pak
+        run: install.packages("pak", repos = "https://r-lib.github.io/p/pak/dev/")
+        shell: Rscript {0}
+      - name: Install dependencies with pak
+        run: |
+          pak::local_install_dev_deps(upgrade = FALSE, ask = FALSE)
+          pak::pak("any::rcmdcheck", ask = FALSE)
+        shell: Rscript {0}
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          args: ${{ matrix.config.args }}
+          upload-snapshots: true
