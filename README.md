@@ -21,6 +21,30 @@ Its central rule is: **make the evidence network scientifically coherent before 
 
 Heavy statistical backends are optional dependencies. Python and Julia are never required for the core package.
 
+## Installation
+
+Install from GitHub using `pak` (fast, binary where available) or `remotes`:
+
+```r
+# pak — quick install, no vignettes built
+pak::pak("wep69/nmaFlow")
+
+# pak — full install, rebuilds vignettes
+pak::pak("wep69/nmaFlow", dependencies = TRUE, upgrade = FALSE)
+# then manually: devtools::build_vignettes() or browseVignettes("nmaFlow")
+
+# remotes — quick install, no vignettes
+remotes::install_github("wep69/nmaFlow")
+
+# remotes — full install with vignettes
+remotes::install_github("wep69/nmaFlow", build_vignettes = TRUE)
+```
+
+> **Note:** `pak` does not build vignettes by default. Use `remotes` with
+> `build_vignettes = TRUE` if you need the 24 pedagogical vignettes installed
+> locally. Alternatively, install without vignettes and read the `.Rmd` sources
+> directly from `vignettes/`.
+
 ## Documentation
 
 Start with:
