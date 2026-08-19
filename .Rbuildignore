@@ -1,0 +1,7 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^validation$
+^tools$
+^README_DEV\.md$
+
+^inst/doc$

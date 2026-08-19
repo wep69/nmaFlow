@@ -1,0 +1,26 @@
+# R
+.Rhistory
+.Rdata
+.RData
+.httr-oauth
+.Rproj.user/
+*.Rproj
+
+# Build
+doc/
+docs/
+Meta/
+*.tar.gz
+*_Rcheck/
+00LOCK-*
+
+# Validation artifacts
+validation/
+tools/
+logs/
+IMPLEMENTATION_REPORT.md
+_pkgdown.yml
+
+# OS
+Thumbs.db
+.DS_Store

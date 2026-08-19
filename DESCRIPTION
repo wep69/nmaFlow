@@ -1,0 +1,80 @@
+Package: nmaFlow
+Type: Package
+Title: Integrated Workflows for Network Meta-Analysis
+Version: 0.1.0.9000
+Authors@R: c(
+    person("Walter Esfrain", "Pereira", email = "walter@cca.ufpb.br",
+           role = c("aut", "cre", "cph"),
+           comment = c(ORCID = "0000-0003-1085-0191")),
+    person("Magali Haidee", "Pereira Martinez", role = "aut",
+           comment = c(ORCID = "0009-0009-5419-959X"))
+    )
+Description: A design-aware and teaching-oriented integration layer for network
+    meta-analysis. It standardizes arm-level, contrast-level, individual and
+    mixed-format evidence; audits and repairs data architecture without silently
+    altering scientific treatment definitions; diagnoses network geometry and
+    transitivity; orchestrates frequentist, Bayesian, bootstrap, dose-response,
+    time-course, component, multivariate, IPD and cross-design workflows; and
+    produces publication-ready tables, figures and reproducible reports. Core
+    functionality remains R-only, while heavy statistical engines and Python or
+    Julia interoperability are optional.
+License: GPL-3 + file LICENSE
+Encoding: UTF-8
+Depends: R (>= 4.3.0)
+Imports:
+    stats,
+    utils,
+    rlang
+Suggests:
+    netmeta,
+    meta,
+    NMA,
+    multinma,
+    gemtc,
+    rjags,
+    nmaINLA,
+    MBNMAdose,
+    MBNMAtime,
+    netdose,
+    crossnma,
+    mixmeta,
+    mvmeta,
+    metaSEM,
+    OpenMx,
+    lavaan,
+    ggplot2,
+    igraph,
+    ggraph,
+    patchwork,
+    tibble,
+    dplyr,
+    tidyr,
+    purrr,
+    broom,
+    gt,
+    flextable,
+    officer,
+    rmarkdown,
+    knitr,
+    testthat (>= 3.0.0),
+    jsonlite,
+    cli,
+    digest,
+    future,
+    future.apply,
+    posterior,
+    bayesplot,
+    rankinma,
+    nmarank,
+    NMAoutlier,
+    PINMA,
+    nmathresh,
+    viscomp,
+    NMAforest,
+    forestly,
+    robvis,
+    reticulate
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.0

@@ -1,0 +1,259 @@
+---
+title: "Complete Agronomic NMA Workflow: Irrigation, Nitrogen, and Soil Amendments"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Complete Agronomic NMA Workflow: Irrigation, Nitrogen, and Soil Amendments}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+library(nmaFlow)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE,
+  purl = FALSE,
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+> **Teaching note.** The agronomic datasets used here are reproducibly simulated teaching data. They are designed to expose realistic NMA problems, but they are not field evidence and should not be interpreted as empirical agronomic findings.
+
+# Scope
+
+**Coverage:** Integrated application across all modules.
+
+
+# Learning objectives
+
+This vignette is designed so that a reader can understand the scientific decision, run the principal functions, diagnose failure modes, and report the result without relying on the ecosystem tutorial for basic context.
+
+
+# Workflow A: irrigation strategies
+
+```{r}
+dat <- nma_data_example("agro_irrigation")
+x <- nma_data(dat, study="study", treatment="treatment", arm="arm")
+pre <- nma_preflight(x, n="n", mean="mean", sd="sd")
+net <- nma_network(x)
+e <- nma_effects(x, "MD", mean="mean", sd="sd", n="n")
+fit <- nma_fit_freq(e, sm="MD", reference="Rainfed")
+```
+
+Then assess `soil_pH`, rainfall and year as prespecified effect modifiers; check global/local inconsistency; study influence; bootstrap interval stability; league estimates; and rank uncertainty.
+
+# Workflow B: nitrogen source and dose
+
+Use coarse/fine nodes to separate the primary N-source question from detailed formulation/dose structure. Fit the categorical primary NMA first, then a dose-response model if dose support is adequate. Compare curve families on scientific plausibility and predictive fit.
+
+# Workflow C: soil-amendment combinations
+
+Define components before fitting. Compare a standard treatment-node NMA against additive component NMA. Add selected interactions only if combinations identify them.
+
+# Reporting sequence
+
+1. evidence question and agronomic context;
+2. node taxonomy and network-repair audit;
+3. geometry and direct evidence support;
+4. transitivity;
+5. primary model and heterogeneity;
+6. inconsistency diagnostics;
+7. sensitivity/bootstrap;
+8. advanced model only if required by the data structure;
+9. effect table and prediction interval;
+10. ranking with uncertainty;
+11. reproducibility bundle.
+
+This ordering prevents advanced methods from obscuring basic evidence limitations.
+
+
+# Common mistakes
+
+- fitting the module before resolving network architecture;
+- selecting a method only because it gives a smaller p-value or a preferred rank;
+- ignoring multi-arm dependence;
+- omitting uncertainty from tables or figures;
+- interpreting model availability as evidence that the model is identifiable;
+- failing to record the backend, seed, version, and sensitivity assumptions.
+
+# Minimum reporting checklist
+
+- [ ] scientific estimand stated;
+- [ ] required network/data assumptions reviewed;
+- [ ] model and backend named;
+- [ ] uncertainty reported;
+- [ ] diagnostics performed;
+- [ ] sensitivity limitations discussed;
+- [ ] code, seed, and package versions retained.
+
+
+# Pedagogical deepening
+
+## The scientific question this module answers
+
+**How does a complete agronomic NMA move from extraction to a defensible manuscript result?**
+
+The question should be written before calling the estimator. Doing so separates an analysis decision from a software choice and makes sensitivity analyses interpretable.
+
+## Agronomic teaching scenario
+
+Three case studies cover irrigation, nitrogen source/dose, and multicomponent soil amendments.
+
+Use the scenario to identify the experimental/evidence unit, treatment definition, outcome scale, potential effect modifiers, and the minimum network geometry needed before fitting the specialized model.
+
+## Functions in this vignette
+
+`nma_data()`, `nma_preflight()`, `nma_effects()`, `nma_fit_freq()`, `nma_transitivity()`, `nma_inconsistency()`, `nma_boot_coef()`, `nma_rank()`, `nma_report()`
+
+These functions are designed as a sequence rather than independent conveniences. The first functions prepare or interrogate the evidence, the middle functions fit or challenge a model, and the final functions communicate uncertainty and provenance.
+
+## Step 1. Confirm that the network reaching this module is admissible
+
+```{r}
+# Always inspect the upstream evidence object first.
+validation <- nma_validate(x, strict = FALSE)
+preflight <- nma_preflight(x)
+network <- nma_network(x)
+
+validation$issues
+preflight
+network
+```
+
+If the preflight is RED, do not solve the warning by fitting a more complex model. Return to `01-data-architecture-network-formation.Rmd`. Complexity can model heterogeneity, dependence, nonlinearity, or multiple evidence types; it cannot create legitimate randomized comparisons that do not exist.
+
+## Step 2. State the target estimand in words
+
+Before fitting, complete a sentence of the form:
+
+> Among the target agronomic population/context, the analysis estimates the relative effect of intervention strategy **A versus B** on **outcome Y**, at **time/scale Z**, averaging or conditioning over **specified modifiers**, under the declared network model.
+
+For a dose, time-course, component, multivariate, or ML-NMR analysis, add the structural quantity being modeled: dose-response curve, time trajectory, component contribution, outcome vector, or conditional population-average effect.
+
+## Step 3. Inspect support, not only sample size
+
+A large total sample can coexist with weak indirect evidence if one comparison is supported by a single bridge study. Record:
+
+- number of studies and arms;
+- number of multi-arm studies;
+- number of treatments/nodes;
+- connected components;
+- studies per direct edge;
+- effect-modifier overlap;
+- availability of uncertainty measures;
+- whether one study or design is structurally dominant.
+
+```{r}
+net <- nma_network(x)
+net$nodes
+net$edges
+nma_multiarm_check(x)
+```
+
+## Step 4. Fit the simplest defensible specification first
+
+Start from the prespecified primary model. Add complexity one scientific problem at a time. Keep the primary and extension fits in a named list so that differences can be inspected explicitly.
+
+```{r}
+fits <- list(
+  primary = fit_primary,
+  extension = fit_extension
+)
+
+nma_sensitivity(fits)
+```
+
+This pattern prevents the analysis from becoming an undocumented sequence of model searches.
+
+## Step 5. Diagnose before interpretation
+
+The exact diagnostic depends on the module, but every analysis should address four layers:
+
+1. **data/network validity**: node identity, connectivity, multi-arm structure;
+2. **scientific assumptions**: transitivity, modifier support, time/dose/component assumptions;
+3. **statistical fit**: heterogeneity, inconsistency, residual/predictive fit, convergence;
+4. **stability**: study influence, node policy, missingness, prior/model sensitivity, bootstrap where applicable.
+
+```{r}
+# Common diagnostic scaffold; use only functions appropriate to the fitted backend.
+nma_transitivity(x, modifiers = candidate_modifiers)
+nma_inconsistency(fit_primary)
+nma_influence(fit_primary)
+```
+
+## Step 6. Interpret effect magnitude before ordering treatments
+
+For each key comparison, ask:
+
+- What is the point estimate on the original scientific scale?
+- What interval quantifies uncertainty?
+- Is a prediction interval meaningful and available?
+- Is the effect large enough to matter agronomically?
+- Does the interval include effects with different practical conclusions?
+- How much of the estimate is direct versus indirect?
+- Is the conclusion stable across defensible analyses?
+
+Rank summaries should follow, not replace, this interpretation.
+
+## Step 7. Produce an audit-friendly output
+
+```{r}
+# Typical outputs; adapt to the backend and module.
+nma_table(fit_primary, component = "summary")
+nma_report(fit_primary, file = "module_analysis.md")
+nma_session()
+```
+
+A publication table should identify the effect measure, direction of benefit, model framework, interval type, reference treatment, and heterogeneity assumptions. A figure should use scales that preserve magnitude and should display uncertainty whenever possible.
+
+# Interpretation framework
+
+| Question | Acceptable evidence | Warning sign |
+|---|---|---|
+| Is the model identifiable? | stable estimates and supported parameters | boundary estimates, huge intervals, failed replicates |
+| Is indirect evidence credible? | comparable effect-modifier distributions | treatment comparisons occur in different contexts |
+| Is inconsistency tolerable? | no material conflict after scientific review | local conflict persists under plausible node policies |
+| Is uncertainty represented? | intervals/predictive uncertainty shown | rank only, or point estimates without intervals |
+| Is the conclusion stable? | primary and prespecified sensitivity models agree substantively | one study, prior, correction, or node mapping reverses the conclusion |
+
+# A worked interpretation exercise
+
+After fitting the module-specific model, write three separate statements:
+
+1. **Estimation statement:** describe the size and direction of the main relative effect with its uncertainty.
+2. **Assumption statement:** state which transitivity/model assumptions are most consequential and how they were checked.
+3. **Decision statement:** state what can and cannot be concluded for agronomic practice without equating statistical ranking with practical superiority.
+
+Keeping these statements separate reduces overclaiming.
+
+# Reproducibility exercise
+
+```{r}
+set.seed(260819)
+
+# Save the object and all architecture decisions.
+nma_reproduce(x, dir = "repro_input")
+
+# Save the final model/report separately.
+saveRDS(fit_primary, "fit_primary.rds")
+nma_report(fit_primary, "analysis_report.md")
+```
+
+Re-run the analysis after changing **one** justified assumption. Record exactly what changed and whether the scientific conclusion changed. This is the preferred teaching format for sensitivity analysis.
+
+# End-of-vignette self-check
+
+A reader should now be able to answer all of the following without consulting the software help page:
+
+- What scientific problem does this module solve?
+- Which data structure is required?
+- Which assumptions are added relative to a standard NMA?
+- Which diagnostics are mandatory before interpretation?
+- Which result should be reported first?
+- Which sensitivity analysis would be most informative?
+- Which package/backend actually performs the specialized estimation?
+- Which decisions belong in the audit trail?
+
+If any answer is unclear, return to the relevant earlier section rather than adding another model.

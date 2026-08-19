@@ -1,0 +1,932 @@
+---
+title: "nmaFlow: From Network Formation to Advanced Network Meta-Analysis"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{nmaFlow: From Network Formation to Advanced Network Meta-Analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+library(nmaFlow)
+library(nmaFlow)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE,
+  purl = FALSE,
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+> **Teaching note.** The agronomic datasets used here are reproducibly simulated teaching data. They are designed to expose realistic NMA problems, but they are not field evidence and should not be interpreted as empirical agronomic findings.
+
+
+# 1. Why this tutorial exists
+
+Network meta-analysis is often introduced as an extension of pairwise meta-analysis. In practice, the difficult part usually starts earlier. A treatment label may encode dose, formulation, route, timing, or a combination of active components. Different reports can use different names for the same intervention. Outcomes may share a name but not a unit, time point, population, or estimand. Multi-arm studies create correlated contrasts. A network can appear connected only because incompatible evidence was pooled, or appear disconnected because equivalent labels were not reconciled.
+
+`nmaFlow` is organized around a stricter rule:
+
+**Build a scientifically defensible evidence network first. Fit models second. Diagnose transitivity and consistency before ranking treatments. Report effect magnitude and uncertainty before declaring a winner.**
+
+This vignette is the ecosystem map. It starts with data architecture and moves through frequentist, Bayesian, bootstrap, dose-response, component, time-course, IPD/ML-NMR, cross-design, ranking, publication, simulation, and interoperability workflows.
+
+# 2. Learning objectives
+
+After completing this tutorial, the reader should be able to:
+
+1. distinguish a data-cleaning problem from a genuine scientific disconnection in the evidence network;
+2. preserve study, arm, node, outcome, unit, time, population, and multi-arm structure;
+3. maintain fine and coarse treatment nodes without silently merging interventions;
+4. recover or flag missing dispersion using an auditable hierarchy;
+5. choose an effect measure and direction that match the agronomic estimand;
+6. fit frequentist NMA with `netmeta` or the alternative `NMA` backend;
+7. fit Bayesian NMA and network meta-regression using `multinma`;
+8. resample complete studies for bootstrap inference without breaking multi-arm trials;
+9. evaluate transitivity, global inconsistency, local inconsistency, and loop structure;
+10. perform influence, outlier, missing-data, and zero-event sensitivity analyses;
+11. fit network meta-regression without using post-hoc covariate fishing;
+12. distinguish categorical treatment NMA from dose-response and nonlinear NMA;
+13. analyze multicomponent interventions, longitudinal outcomes, IPD, ML-NMR, cross-design evidence, and multivariate outcomes;
+14. interpret rankings as uncertain secondary summaries;
+15. create publication-oriented network graphs, league tables, forest plots, diagnostics, and reports;
+16. simulate agronomic networks whose truth is known for teaching and validation;
+17. export reviewed analysis data and templates to Python, Julia, SAS, Stata, Mplus, JAGS, and BUGS without making those ecosystems mandatory.
+
+# 3. The package in one map
+
+```{r}
+library(nmaFlow)
+nma_capabilities()
+nma_blocks()
+```
+
+The package is an orchestration layer. Stable external engines remain responsible for specialized estimation; `nmaFlow` standardizes the data contract, diagnostics, model metadata, teaching language, publication layer, and audit trail.
+
+# 4. Teaching datasets
+
+```{r}
+agro_n <- nma_data_example("agro_nitrogen")
+agro_i <- nma_data_example("agro_irrigation")
+agro_b <- nma_data_example("agro_biostimulants")
+agro_p <- nma_data_example("agro_crop_protection")
+agro_s <- nma_data_example("agro_soil_amendments")
+agro_t <- nma_data_example("agro_timecourse")
+agro_m <- nma_data_example("agro_multioutcome")
+agro_x <- nma_data_example("agro_inconsistent")
+```
+
+| Dataset | Agronomic question | Main teaching use |
+|---|---|---|
+| `agro_nitrogen` | sources and nominal N dose | node policy, continuous outcomes, dose-response |
+| `agro_irrigation` | irrigation strategies | basic connected NMA |
+| `agro_biostimulants` | biostimulant strategies | complex interventions and components |
+| `agro_crop_protection` | chemical, biological and IPM strategies | binary/count-like decisions and zero-event sensitivity |
+| `agro_soil_amendments` | lime, gypsum, biochar and combinations | component NMA |
+| `agro_multienv` | genotypes across evidence contexts | effect modifiers and meta-regression |
+| `agro_timecourse` | treatment response over time | time-course NMA |
+| `agro_multioutcome` | yield, protein and water-use efficiency | multivariate preparation |
+| `agro_inconsistent` | deliberately conflicting evidence | inconsistency diagnosis |
+
+# Part I. Data architecture before statistics
+
+# 5. Declare the evidence structure
+
+```{r}
+d <- nma_data(
+  agro_i,
+  study = "study",
+  treatment = "treatment",
+  arm = "arm",
+  outcome = NULL
+)
+d
+```
+
+The object preserves the original data, current analysis data, quarantined rows, field mapping, and a cumulative audit log. This separation is intentional. A scientific review should be able to reconstruct what changed between import and model fitting.
+
+# 6. Validate before attempting repair
+
+```{r}
+v <- nma_validate(
+  d,
+  n = "n",
+  mean = "mean",
+  sd = "sd"
+)
+v
+nma_table(v, component = "issues")
+```
+
+Validation looks for missing identifiers, missing treatment labels, duplicate rows, repeated nodes within a study, single-arm strata, mixed units, multiple time points, missing dispersion, impossible denominators, and disconnected geometry. It reports rather than silently modifies.
+
+# 7. Build and inspect the network
+
+```{r}
+net <- nma_network(d)
+net
+nma_plot(net, type = "network")
+```
+
+A connected graph is necessary for a standard connected NMA, but connectivity alone does not prove validity. A false bridge created by merging incompatible treatments is worse than an honest disconnected network.
+
+# 8. Preflight: GREEN, YELLOW, or RED
+
+```{r}
+pre <- nma_preflight(d, n = "n", mean = "mean", sd = "sd")
+pre
+```
+
+The preflight state is a communication device:
+
+- **GREEN**: no blocking architecture problem was detected;
+- **YELLOW**: the network can proceed only after documented review of warnings;
+- **RED**: a blocking problem such as disconnected geometry or invalid study structure remains.
+
+# 9. Conservative repair workflow
+
+Create a deliberately messy copy:
+
+```{r}
+bad <- agro_i
+bad$treatment[bad$treatment == "Full irrigation"][1] <- " Full Irrigation "
+bad <- rbind(bad, bad[1, ])
+xbad <- nma_data(bad, study = "study", treatment = "treatment", arm = "arm")
+
+nma_validate(xbad)
+nma_harmonize_candidates(xbad)
+nma_reconnect_plan(xbad)
+```
+
+Apply only safe formatting repairs and quarantine exact duplicates:
+
+```{r}
+x1 <- nma_repair(
+  xbad,
+  trim_whitespace = TRUE,
+  normalize_equivalent_spelling = TRUE,
+  quarantine_exact_duplicates = TRUE
+)
+
+nma_audit(x1)
+nma_quarantine(x1)
+nma_network_repair_report(xbad, x1)
+```
+
+The package does **not** automatically merge semantically similar nodes from edit distance. Candidate generation is advisory. A mapping that changes scientific node identity requires explicit review:
+
+```{r}
+map <- data.frame(
+  from = c("Urea 100 kg N/ha", "Urea 100 kg ha-1"),
+  to   = c("Urea|100", "Urea|100")
+)
+
+x2 <- nma_apply_mapping(
+  x1,
+  mapping = map,
+  field = "treatment",
+  reviewed = TRUE,
+  reason = "Verified against intervention definitions in the included reports"
+)
+```
+
+# 10. Fine and coarse nodes
+
+Dose, formulation, route, timing, and co-intervention details can be scientifically important while also fragmenting the primary network. `nmaFlow` supports two simultaneous node levels.
+
+```{r}
+dict <- data.frame(
+  label = unique(agro_n$treatment),
+  fine = paste0(unique(agro_n$treatment), "|", c(0,100,100,100,100)),
+  coarse = c("No N", "Urea", "Ammonium sulfate", "Urea", "Organic N")
+)
+
+xn <- nma_data(agro_n, study = "study", treatment = "treatment", arm = "arm")
+xn <- nma_node_policy(
+  xn,
+  dictionary = dict,
+  reviewed = TRUE,
+  reason = "Primary synthesis by N source class; dose/formulation preserved in fine node"
+)
+
+nma_network(xn, node = "coarse")
+nma_network(xn, node = "fine")
+```
+
+Coarse and fine nodes answer different questions. The coarse network should not be interpreted as evidence that all fine interventions are biologically interchangeable; that assumption must be defended.
+
+# 11. Explicit unit conversion
+
+```{r}
+# Example only: convert a yield column from kg/ha to t/ha when the rule is known.
+xu <- nma_convert_units(
+  x = d,
+  value = "mean",
+  unit = "unit",
+  from = "kg ha-1",
+  to = "t ha-1",
+  multiplier = 0.001,
+  reviewed = TRUE,
+  reason = "SI conversion: 1000 kg = 1 t"
+)
+```
+
+The function refuses to guess conversion factors. A network should never be connected by an undocumented unit assumption.
+
+# 12. Split incompatible strata
+
+```{r}
+# If a file contains several outcomes or follow-up times:
+strata <- nma_split_strata(
+  nma_data(agro_m, study = "study", treatment = "treatment", arm = "arm",
+           outcome = "outcome", unit = "unit"),
+  by = c("outcome", "unit")
+)
+```
+
+Outcome, time, population, and unit can be part of the estimand. Pool them only when the scientific question and statistical model justify doing so.
+
+# Part II. Effect measures and multi-arm structure
+
+# 13. Choose the effect measure deliberately
+
+```{r}
+nma_measure(scale_type = "continuous", same_scale = TRUE)
+nma_measure(scale_type = "binary")
+nma_direction(agro_i$mean, higher_is_better = TRUE, target = "higher")
+```
+
+For agronomic continuous outcomes measured on the same scale, MD often has the clearest interpretation. Ratio of means can be useful when relative proportional response is scientifically meaningful. Binary outcomes may use RR, OR, or RD depending on the estimand and event frequency.
+
+# 14. Recover dispersion without inventing it
+
+```{r}
+nma_dispersion(n = 40, se = 0.25)
+nma_dispersion(n = 40, mean = 6.0, cv = 0.10)
+nma_dispersion(n = 40, ci_lower = 5.5, ci_upper = 6.5, level = 0.95)
+```
+
+Every recovery route should be documented. If a reported SD cannot be reconstructed from defensible information, mark it missing and address it in a sensitivity or missing-data model rather than silently imputing an arbitrary value.
+
+# 15. Preserve multi-arm trials
+
+```{r}
+nma_multiarm_check(d)
+eff <- nma_effects(d, measure = "MD", mean = "mean", sd = "sd", n = "n")
+eff
+```
+
+Pairwise contrasts from the same multi-arm trial are correlated. `nma_effects()` preserves the common study identifier and flags multi-arm contrasts so that downstream engines can handle them as one randomized experiment.
+
+# Part III. Frequentist NMA
+
+# 16. Core `netmeta` workflow
+
+```{r}
+fit_f <- nma_fit_freq(
+  eff,
+  sm = "MD",
+  random = TRUE,
+  common = FALSE,
+  reference = "Rainfed",
+  method_tau = "REML"
+)
+
+nma_freq_summary(fit_f)
+nma_predict(fit_f)
+nma_direct(fit_f)
+nma_contribution(fit_f)
+```
+
+The model should be described in terms of the effect measure, common/random treatment effects, heterogeneity estimator, reference treatment, and handling of multi-arm studies.
+
+# 17. Alternative frequentist engine
+
+```{r}
+fit_nh <- nma_fit_nma(
+  d,
+  measure = "MD",
+  ref = "Rainfed",
+  mean = "mean",
+  sd = "sd",
+  n = "n",
+  method = "NH"
+)
+```
+
+The alternative engine is useful for cross-checking results under a multivariate NMA formulation. Agreement across engines is reassuring only when the estimand and model assumptions are genuinely comparable.
+
+# Part IV. Bayesian NMA
+
+# 18. Build a Bayesian network
+
+```{r}
+net_b <- nma_make_multinma(
+  d,
+  outcome_type = "continuous",
+  y = "mean",
+  se = "se",
+  sample_size = "n",
+  reference = "Rainfed"
+)
+```
+
+If the source reports SD rather than SE, derive and audit the SE before constructing the network.
+
+# 19. Priors, model fitting, and diagnostics
+
+```{r}
+prior_d <- nma_prior("normal", 0, 2)
+prior_tau <- nma_prior("half_normal", 0, 0.5)
+
+fit_b <- nma_fit_bayes(
+  net_b,
+  consistency = "consistency",
+  trt_effects = "random",
+  prior_trt = prior_d,
+  prior_het = prior_tau,
+  chains = 4,
+  iter = 4000,
+  seed = 260819
+)
+
+nma_mcmc_diagnose(fit_b)
+nma_pp_check(fit_b, type = "loo")
+nma_bayes_summary(fit_b, all_contrasts = TRUE)
+```
+
+A Bayesian result is not complete without prior rationale, convergence assessment, posterior uncertainty, model-fit or predictive checks, and prior sensitivity when the network is sparse.
+
+# Part V. Bootstrap and sensitivity
+
+# 20. Study-level bootstrap
+
+```{r}
+boot <- nma_boot_coef(
+  fit_f,
+  B = 1999,
+  seed = 260819
+)
+
+boot
+nma_boot_diagnose(boot)
+nma_plot(boot, type = "bootstrap")
+```
+
+The study is the default resampling unit. When a multi-arm study is selected, all its contrasts remain together. Failed replicates are not hidden; their frequency is itself a model-stability diagnostic.
+
+# 21. Ranking uncertainty under bootstrap
+
+```{r}
+boot_rank <- nma_boot_rank(
+  fit_f,
+  B = 1999,
+  seed = 260819,
+  small_values = "undesirable"
+)
+```
+
+A treatment that ranks first in 52% of replicates is a different result from one that ranks first in 98%, even if both have the same point ranking.
+
+# 22. Influence, outliers, missing data, and zero events
+
+```{r}
+infl <- nma_influence(fit_f)
+out <- nma_outliers(fit_f, engine = "influence")
+
+# Missing-data scenarios are explicit transformations, not silent edits.
+scenarios <- list(
+  complete_case = function(z) z,
+  conservative  = function(z) z
+)
+nma_missing_sensitivity(d, scenarios)
+```
+
+For binary evidence:
+
+```{r}
+# x_binary is an arm-level binary nmaflow_data object.
+nma_zero_event_sensitivity(
+  x_binary,
+  corrections = c(0, 0.25, 0.5, 1),
+  event = "event",
+  total = "n",
+  measure = "OR"
+)
+```
+
+Sensitivity analysis is useful when it changes a scientific conclusion, not when it becomes a collection of unmotivated alternative models.
+
+# Part VI. Transitivity and inconsistency
+
+# 23. Effect-modifier balance and transitivity
+
+```{r}
+nma_transitivity(
+  d,
+  modifiers = c("soil_pH", "rainfall", "year"),
+  by = "treatment"
+)
+```
+
+Transitivity is primarily a scientific assumption about the distribution of effect modifiers across comparisons. It cannot be established by a single p-value.
+
+# 24. Global and local inconsistency
+
+```{r}
+nma_inconsistency(fit_f, method = "design")
+nma_nodesplit(fit_f)
+nma_netheat(fit_f)
+nma_loop_check(d, max_length = 4)
+```
+
+A local inconsistency signal should trigger reinspection of treatment definitions, population, co-interventions, outcome timing, and risk-of-bias patterns before being treated as a purely statistical anomaly.
+
+# Part VII. Network meta-regression
+
+# 25. Prespecified effect modifiers
+
+```{r}
+mods <- nma_effect_modifier(d, c("soil_pH", "rainfall", "year"))
+mods
+
+reg <- nma_regression(
+  fit_f,
+  regression = ~ soil_pH
+)
+```
+
+Network meta-regression can easily be overinterpreted because study-level covariates are sparse and ecological. Prespecify plausible modifiers, inspect support across comparisons, and avoid selecting moderators only because their p-values are small.
+
+# Part VIII. Dose-response and nonlinear NMA
+
+# 26. Dose as a continuous intervention feature
+
+```{r}
+# netdose requires contrast-level dose information supplied in ...
+# MBNMAdose requires an mb.network-compatible arm-level structure.
+fit_dose <- nma_dose(
+  data = dose_data,
+  framework = "bayesian",
+  model = "emax",
+  method = "random"
+)
+```
+
+# 27. Agronomic nonlinear response
+
+```{r}
+fit_mits <- nma_nonlinear(
+  dose_data,
+  model = "mitscherlich",
+  framework = "bayesian"
+)
+
+nma_dose_curve(fit_mits)
+```
+
+A nonlinear model should be chosen because its shape expresses the agronomic process and is identifiable from the available dose range. Do not infer an optimum outside the evidence support simply because the curve can be extrapolated.
+
+# Part IX. Complex evidence structures
+
+# 28. Component NMA
+
+```{r}
+fit_cnma <- nma_component(
+  fit_component_network,
+  inactive = "Control",
+  sep_components = "+"
+)
+```
+
+Component NMA assumes that complex interventions can be represented through component effects under the chosen model. Interactions between components require additional information and should not be added automatically.
+
+# 29. Time-course NMA
+
+```{r}
+fit_time <- nma_time(
+  longitudinal_network_data,
+  fun = time_function,
+  method = "random"
+)
+```
+
+Repeated follow-up times should not be treated as independent studies. Time-course models represent the within-study trajectory explicitly.
+
+# 30. IPD and ML-NMR
+
+```{r}
+ipd_net <- nma_ipd(
+  ipd,
+  study = "study",
+  treatment = "treatment",
+  outcome = "yield",
+  outcome_type = "continuous"
+)
+
+mlnmr_net <- nma_mlnmr(
+  ipd_network = ipd_net,
+  agd_network = agd_net,
+  reference = "Control",
+  integration = integration_rule
+)
+```
+
+ML-NMR is especially useful when treatment effect modification is important and some studies provide individual participant or experimental-unit data while others provide only aggregate summaries. Harmonizing estimands across sources is part of the analysis, not clerical preprocessing.
+
+# 31. Cross-design, multivariate, and SEM-NMA
+
+```{r}
+cross_fit <- nma_crossdesign(
+  # arguments required by crossnma.model()
+)
+
+mv_fit <- nma_multivariate(
+  y = effect_matrix,
+  S = within_study_covariance,
+  data = mv_data
+)
+
+sem_fit <- nma_sem(
+  engine = "metaSEM",
+  function_name = "meta"
+)
+```
+
+These modules are advanced because they solve different structural problems: integration of randomized/non-randomized evidence, correlated outcomes, and latent/path structures. They are not interchangeable general-purpose upgrades.
+
+# Part X. Ranking and decisions
+
+# 32. Rank with uncertainty
+
+```{r}
+r <- nma_rank(fit_f, small_values = "undesirable")
+r
+nma_rank_uncertainty(r)
+```
+
+Ranking is secondary to the treatment-effect table. Report effect size, interval, prediction interval when relevant, and rank uncertainty together.
+
+# 33. Multi-criteria agronomic decisions
+
+```{r}
+# Keep decision utility separate from the statistical NMA estimand.
+utility <- nma_utility(
+  estimates = decision_table,
+  treatment = "treatment",
+  criteria = c("yield", "WUE", "cost", "N_loss"),
+  weights = c(yield = 0.40, WUE = 0.25, cost = 0.20, N_loss = 0.15),
+  directions = c(yield = "higher", WUE = "higher", cost = "lower", N_loss = "lower")
+)
+```
+
+Weights encode stakeholder values. They are not statistical estimates and should be reported transparently.
+
+# Part XI. Publication-ready outputs
+
+# 34. Network, forest, league, inconsistency, and funnel figures
+
+```{r}
+nma_plot(d, type = "network")
+nma_plot(fit_f, type = "forest")
+nma_plot(fit_f, type = "funnel")
+nma_plot(fit_f, type = "inconsistency")
+```
+
+# 35. Tables
+
+```{r}
+nma_table(fit_f, component = "summary")
+nma_table(fit_f, component = "league", format = "gt")
+nma_league(fit_f)
+nma_sof(fit_f)
+```
+
+# 36. Reproducible report
+
+```{r}
+nma_report(
+  fit_f,
+  file = "agronomic_nma_report.md",
+  title = "Network meta-analysis of irrigation strategies"
+)
+```
+
+Publication outputs should expose uncertainty, direct/indirect evidence, heterogeneity, inconsistency, and the treatment network. Decorative figures are secondary to diagnostic and inferential clarity.
+
+# Part XII. Simulation and teaching
+
+# 37. Simulate a known agronomic network
+
+```{r}
+sim <- nma_simulate(
+  domain = "nitrogen",
+  studies = 50,
+  multiarm_fraction = 0.25,
+  heterogeneity = 0.15,
+  inconsistency = 0,
+  seed = 260819
+)
+
+attr(sim, "simulation_truth")
+```
+
+Known-truth simulation is useful for teaching, unit tests, benchmark studies, and sensitivity analysis. It is not a substitute for empirical validation.
+
+# 38. Guided tours
+
+```{r}
+nma_tour("network")
+nma_tour("bayesian")
+nma_tour("dose")
+nma_explain("transitivity")
+nma_workflow(d, question = "Which irrigation strategy improves yield?")
+```
+
+# Part XIII. Interoperability and reproducibility
+
+# 39. External ecosystems are optional
+
+```{r}
+nma_export(d, engine = "python")
+nma_export(d, engine = "julia")
+nma_export(d, engine = "sas")
+nma_export(d, engine = "stata")
+nma_export(d, engine = "mplus")
+nma_export(d, engine = "jags")
+```
+
+Exported scripts are reviewed starting points. `nmaFlow` does not claim that a generic external template reproduces a specialized R backend automatically.
+
+# 40. Save a complete reproducibility bundle
+
+```{r}
+nma_reproduce(d, dir = "repro_bundle")
+nma_session()
+```
+
+# Part XIV. Common mistakes
+
+## 41. Repairing connectivity by merging names automatically
+
+Do not use fuzzy similarity as a scientific node definition. Use `nma_harmonize_candidates()` to flag candidates and `nma_apply_mapping(..., reviewed = TRUE)` only after verification.
+
+## 42. Pooling all follow-up times into one network
+
+Time point can modify both outcome magnitude and treatment effect. Use explicit strata or a time-course model.
+
+## 43. Breaking a multi-arm study into independent two-arm trials
+
+Keep a common study identifier and use an engine that models the induced correlation.
+
+## 44. Choosing the model with the most favorable ranking
+
+Model choice should precede ranking. A change in ranking across defensible models is a sensitivity result, not a reason to select the desired model.
+
+## 45. Interpreting transitivity as a statistical test
+
+Transitivity is defended using design knowledge, effect-modifier distributions, and eligibility criteria. Inconsistency diagnostics are downstream checks, not proofs of transitivity.
+
+## 46. Treating missing SD as zero uncertainty
+
+Recover SD only from documented information or use explicit sensitivity/imputation methods with justification.
+
+## 47. Extrapolating dose-response curves outside support
+
+Report the supported dose range and distinguish interpolation from extrapolation.
+
+## 48. Reporting SUCRA/P-score without effect estimates
+
+A ranking can be precise only because all treatments are similarly ineffective. Always show relative effects and uncertainty first.
+
+# Part XV. Two integrated workflows
+
+# 49. Basic workflow: irrigation strategies
+
+```{r}
+dat <- nma_data_example("agro_irrigation")
+x <- nma_data(dat, study = "study", treatment = "treatment", arm = "arm")
+
+# Architecture
+nma_validate(x, n = "n", mean = "mean", sd = "sd")
+nma_preflight(x, n = "n", mean = "mean", sd = "sd")
+nma_plot(nma_network(x), type = "network")
+
+# Effects and model
+e <- nma_effects(x, measure = "MD", mean = "mean", sd = "sd", n = "n")
+f <- nma_fit_freq(e, sm = "MD", reference = "Rainfed", random = TRUE)
+
+# Assumptions and diagnostics
+nma_transitivity(x, modifiers = c("soil_pH", "rainfall", "year"))
+nma_inconsistency(f, method = "design")
+nma_nodesplit(f)
+
+# Sensitivity and uncertainty
+b <- nma_boot_coef(f, B = 1999, seed = 260819)
+nma_influence(f)
+
+# Communication
+nma_league(f)
+nma_rank(f)
+nma_plot(f, type = "forest")
+nma_report(f, "irrigation_nma.md")
+```
+
+Interpret this sequence as one analysis grammar: define the evidence, verify that the indirect comparison is scientifically defensible, estimate treatment effects, challenge the model, and communicate uncertainty.
+
+# 50. Advanced workflow: nitrogen source and dose
+
+```{r}
+dat <- nma_data_example("agro_nitrogen")
+x <- nma_data(dat, study = "study", treatment = "treatment", arm = "arm",
+              node_fine = "node_fine", node_coarse = "node_coarse")
+
+# Compare primary and fine geometry.
+coarse_net <- nma_network(x, node = "coarse")
+fine_net <- nma_network(x, node = "fine")
+
+# Primary synthesis at reviewed coarse node level.
+# Dose-response synthesis retains dose as a continuous intervention feature.
+
+# Specialized model shown schematically because backend-specific dose data
+# must be prepared with the exact agent/dose contrast structure required.
+fit_d <- nma_nonlinear(dose_ready_data, model = "mitscherlich", framework = "bayesian")
+nma_dose_curve(fit_d)
+```
+
+The important distinction is between **node equivalence** and **dose modeling**. Collapsing doses into one node assumes exchangeability at the node level. Dose-response NMA instead models the systematic relationship between dose and effect.
+
+# Part XVI. Minimum reporting checklist
+
+- [ ] population/context and estimand defined;
+- [ ] study, arm, treatment, outcome, time, unit, and population identifiers preserved;
+- [ ] fine/coarse node policy documented;
+- [ ] all mappings and unit conversions audited;
+- [ ] quarantine table reviewed;
+- [ ] connected components and weakly supported edges reported;
+- [ ] multi-arm trials preserved;
+- [ ] effect measure and direction justified;
+- [ ] dispersion recovery documented;
+- [ ] transitivity assessed using prespecified modifiers;
+- [ ] statistical framework and backend/version reported;
+- [ ] heterogeneity model/estimator or prior justified;
+- [ ] global and local inconsistency evaluated where identifiable;
+- [ ] numerical or MCMC diagnostics reported;
+- [ ] bootstrap/sensitivity analyses use reproducible seeds;
+- [ ] zero-event and missing-data decisions documented;
+- [ ] dose-response extrapolation limits stated;
+- [ ] ranking reported with effect magnitude and uncertainty;
+- [ ] publication figures/tables identify interval type;
+- [ ] reproducibility bundle and session information retained.
+
+# Part XVII. Suggested reading order for focused vignettes
+
+1. `01-data-architecture-network-formation.Rmd`
+2. `02-effect-measures-multiarm.Rmd`
+3. `03-frequentist-core.Rmd`
+4. `04-bayesian-stan-workflow.Rmd`
+5. `06-transitivity-inconsistency.Rmd`
+6. `05-bootstrap-inference.Rmd`
+7. `07-sensitivity-robustness.Rmd`
+8. `08-network-meta-regression.Rmd`
+9. `09-dose-response-nonlinear.Rmd`
+10. `10-component-nma.Rmd`
+11. `11-time-course-survival.Rmd`
+12. `12-ipd-mlnmr.Rmd`
+13. `13-crossdesign-multivariate-sem.Rmd`
+14. `14-ranking-decision.Rmd`
+15. `15-publication-output.Rmd`
+16. `16-simulation-agronomy.Rmd`
+17. `17-interoperability.Rmd`
+18. `18-teaching-tour.Rmd`
+19. `19-validation-reproducibility.Rmd`
+20. `20-complete-agronomic-workflow.Rmd`
+21. `21-api-example-catalog.Rmd`
+22. `22-state-of-the-art-ecosystem.Rmd`
+23. `23-network-repair-casebook.Rmd`
+
+# Appendix A. Complete block registry
+
+| Block | Module | Primary function |
+|---:|---|---|
+| 1 | Data architecture | `nma_data()` |
+| 2 | Data architecture | `nma_validate()` |
+| 3 | Data architecture | `nma_network()` |
+| 4 | Data architecture | `nma_preflight()` |
+| 5 | Data architecture | `nma_harmonize_candidates()` |
+| 6 | Data architecture | `nma_apply_mapping()` |
+| 7 | Data architecture | `nma_repair()` |
+| 8 | Data architecture | `nma_reconnect_plan()` |
+| 9 | Data architecture | `nma_quarantine()` |
+| 10 | Data architecture | `nma_audit()` |
+| 11 | Effects and preflight | `nma_measure()` |
+| 12 | Effects and preflight | `nma_direction()` |
+| 13 | Effects and preflight | `nma_dispersion()` |
+| 14 | Effects and preflight | `nma_multiarm_check()` |
+| 15 | Effects and preflight | `nma_effects()` |
+| 16 | Effects and preflight | `nma_readiness()` |
+| 17 | Frequentist core | `nma_fit_freq()` |
+| 18 | Frequentist core | `nma_fit_nma()` |
+| 19 | Frequentist core | `nma_fit_additive()` |
+| 20 | Frequentist core | `nma_direct()` |
+| 21 | Frequentist core | `nma_contribution()` |
+| 22 | Frequentist core | `nma_predict()` |
+| 23 | Frequentist core | `nma_freq_summary()` |
+| 24 | Bayesian core | `nma_make_multinma()` |
+| 25 | Bayesian core | `nma_prior()` |
+| 26 | Bayesian core | `nma_fit_bayes()` |
+| 27 | Bayesian core | `nma_nodesplit_bayes()` |
+| 28 | Bayesian core | `nma_pp_check()` |
+| 29 | Bayesian core | `nma_mcmc_diagnose()` |
+| 30 | Bayesian core | `nma_bayes_summary()` |
+| 31 | Bootstrap | `nma_boot()` |
+| 32 | Bootstrap | `nma_boot_coef()` |
+| 33 | Bootstrap | `nma_boot_rank()` |
+| 34 | Bootstrap | `nma_boot_predict()` |
+| 35 | Bootstrap | `nma_boot_diagnose()` |
+| 36 | Transitivity and inconsistency | `nma_transitivity()` |
+| 37 | Transitivity and inconsistency | `nma_inconsistency()` |
+| 38 | Transitivity and inconsistency | `nma_nodesplit()` |
+| 39 | Transitivity and inconsistency | `nma_design_by_treatment()` |
+| 40 | Transitivity and inconsistency | `nma_netheat()` |
+| 41 | Transitivity and inconsistency | `nma_loop_check()` |
+| 42 | Robustness and sensitivity | `nma_influence()` |
+| 43 | Robustness and sensitivity | `nma_outliers()` |
+| 44 | Robustness and sensitivity | `nma_sensitivity()` |
+| 45 | Robustness and sensitivity | `nma_missing_sensitivity()` |
+| 46 | Robustness and sensitivity | `nma_zero_event_sensitivity()` |
+| 47 | Network meta-regression | `nma_regression()` |
+| 48 | Network meta-regression | `nma_effect_modifier()` |
+| 49 | Network meta-regression | `nma_regression_plot()` |
+| 50 | Network meta-regression | `nma_regression_compare()` |
+| 51 | Dose and nonlinear NMA | `nma_dose()` |
+| 52 | Dose and nonlinear NMA | `nma_nonlinear()` |
+| 53 | Dose and nonlinear NMA | `nma_dose_curve()` |
+| 54 | Dose and nonlinear NMA | `nma_dose_optimum()` |
+| 55 | Dose and nonlinear NMA | `nma_dose_compare()` |
+| 56 | Complex evidence | `nma_component()` |
+| 57 | Complex evidence | `nma_time()` |
+| 58 | Complex evidence | `nma_ipd()` |
+| 59 | Complex evidence | `nma_mlnmr()` |
+| 60 | Complex evidence | `nma_crossdesign()` |
+| 61 | Complex evidence | `nma_multivariate()` |
+| 62 | Complex evidence | `nma_sem()` |
+| 63 | Ranking and decisions | `nma_rank()` |
+| 64 | Ranking and decisions | `nma_rank_uncertainty()` |
+| 65 | Ranking and decisions | `nma_utility()` |
+| 66 | Ranking and decisions | `nma_threshold()` |
+| 67 | Publication | `nma_plot()` |
+| 68 | Publication | `nma_table()` |
+| 69 | Publication | `nma_league()` |
+| 70 | Publication | `nma_sof()` |
+| 71 | Publication | `nma_report()` |
+| 72 | Teaching, simulation, interoperability | `nma_simulate()` |
+| 73 | Teaching, simulation, interoperability | `nma_data_example()` |
+| 74 | Teaching, simulation, interoperability | `nma_tour()` |
+| 75 | Teaching, simulation, interoperability | `nma_explain()` |
+| 76 | Teaching, simulation, interoperability | `nma_workflow()` |
+| 77 | Teaching, simulation, interoperability | `nma_export()` |
+| 78 | Teaching, simulation, interoperability | `nma_reproduce()` |
+| 79 | Teaching, simulation, interoperability | `nma_session()` |
+| 80 | Teaching, simulation, interoperability | `nma_capabilities()` |
+
+# Appendix B. A compact starter script
+
+```{r}
+library(nmaFlow)
+
+nma_capabilities()
+
+dat <- nma_data_example("agro_irrigation")
+x <- nma_data(dat, study = "study", treatment = "treatment", arm = "arm")
+
+v <- nma_validate(x, n = "n", mean = "mean", sd = "sd")
+print(v)
+
+pre <- nma_preflight(x, n = "n", mean = "mean", sd = "sd")
+print(pre)
+
+net <- nma_network(x)
+nma_plot(net, type = "network")
+
+e <- nma_effects(x, "MD", mean = "mean", sd = "sd", n = "n")
+
+if (requireNamespace("netmeta", quietly = TRUE)) {
+  fit <- nma_fit_freq(e, sm = "MD", reference = "Rainfed")
+  nma_freq_summary(fit)
+  nma_inconsistency(fit, method = "design")
+  nma_league(fit)
+  nma_rank(fit)
+  nma_report(fit, "starter_nmaflow_report.md")
+}
+```
+
+# Final perspective
+
+The 80 blocks are not 80 unrelated functions. They are a progressive grammar:
+
+**evidence question -> data architecture -> network preflight -> effect construction -> model -> transitivity/inconsistency -> sensitivity -> advanced structure when required -> ranking as a secondary summary -> publication -> reproducibility.**
+
+A sophisticated model cannot rescue an invalid network. Conversely, a carefully designed evidence architecture makes advanced frequentist, Bayesian, nonlinear, component, time-course, IPD, and cross-design analyses interpretable rather than merely executable.

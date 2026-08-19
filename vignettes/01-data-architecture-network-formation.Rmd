@@ -1,0 +1,310 @@
+---
+title: "Data Architecture and Network Formation: Diagnose, Repair, or Stop"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Data Architecture and Network Formation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+library(nmaFlow)
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE,
+  purl = FALSE,
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+> **Teaching note.** The agronomic datasets used here are reproducibly simulated teaching data. They are designed to expose realistic NMA problems, but they are not field evidence and should not be interpreted as empirical agronomic findings.
+
+
+# 1. Why this vignette is deliberately long
+
+Network formation is the highest-leverage stage of NMA. Most statistical engines assume that the analyst has already decided what constitutes a study, an arm, an intervention node, an outcome, and a time point. Those decisions can create or destroy indirect evidence.
+
+This vignette treats network formation as a scientific audit, not as generic data cleaning. It covers Blocks 1-10 plus supporting functions `nma_convert_units()`, `nma_node_policy()`, `nma_split_strata()`, and `nma_network_repair_report()`.
+
+# 2. Learning objectives
+
+The reader should be able to distinguish formatting equivalence from clinical/agronomic equivalence; identify duplicate reports versus duplicate arms; preserve multi-arm structures; construct coarse and fine nodes; audit units and time points; quarantine ambiguous records; diagnose disconnected components; propose possible reconnections without inventing bridges; and document every reviewed change.
+
+# 3. Four classes of network-formation problem
+
+| Class | Example | Programmatic action |
+|---|---|---|
+| Label/identity error | `Urea`, ` urea `, punctuation variants | conservative normalization; candidate generation |
+| Study/arm structure error | duplicated arm, repeated node, split multi-arm study | quarantine/reconstruct from source |
+| Outcome/time/unit incompatibility | kg/ha mixed with t/ha, harvest and 30-day values mixed | explicit conversion or stratification |
+| Genuine scientific disconnection | two intervention classes never linked by eligible randomized evidence | **do not repair**; report disconnected networks or revise the scientific question |
+
+# 4. Create the data contract
+
+```{r}
+dat <- nma_data_example("agro_irrigation")
+x <- nma_data(
+  dat,
+  study = "study",
+  treatment = "treatment",
+  arm = "arm"
+)
+x
+```
+
+An `nmaflow_data` object stores `raw_data`, working `data`, `quarantine`, `audit`, `mapping`, and detected format. The raw layer is never overwritten.
+
+# 5. What validation checks
+
+```{r}
+v <- nma_validate(x, n = "n", mean = "mean", sd = "sd")
+v$issues
+```
+
+The validator checks identifiers, treatment labels, exact duplicates, repeated treatment nodes within strata, single-arm studies, outcome completeness, mixed units, multiple time points, sample sizes, SD/SE validity, binary event denominators, and network connectivity.
+
+## 5.1 Why repeated nodes inside one study matter
+
+If the same node occurs twice in a study, possibilities include duplicated extraction, two legitimate subgroups that should be combined, two time points accidentally pooled, multiple cohorts, or a multi-arm study whose interventions were collapsed too aggressively. The software cannot know which is true from the label alone.
+
+# 6. Geometry as a diagnostic object
+
+```{r}
+net <- nma_network(x)
+net$nodes
+net$edges
+net$components
+```
+
+Inspect degree, number of supporting studies per edge, and components. An edge supported by one small study is technically connected but structurally fragile.
+
+# 7. Preflight as a stopping rule
+
+```{r}
+nma_preflight(x, n = "n", mean = "mean", sd = "sd")
+```
+
+A RED preflight is not a software failure. It is a request to resolve evidence architecture before estimation.
+
+# 8. Case 1: harmless formatting differences
+
+```{r}
+bad <- dat
+bad$treatment[1] <- paste0(" ", bad$treatment[1], " ")
+xb <- nma_data(bad, study = "study", treatment = "treatment", arm = "arm")
+
+nma_harmonize_candidates(xb)
+xr <- nma_repair(xb, trim_whitespace = TRUE)
+nma_audit(xr)
+```
+
+Trimming whitespace is reversible, logged, and does not make a substantive intervention-equivalence claim.
+
+# 9. Case 2: similar names that must not be auto-merged
+
+```{r}
+nma_harmonize_candidates(xb, max_distance = 0.25)
+```
+
+Similarity scores only prioritize manual review. `Urea`, `Urea + inhibitor`, and `Urea foliar` may be close strings but different interventions.
+
+# 10. Reviewed mapping
+
+```{r}
+map <- data.frame(
+  from = c("Urea 100 kg N ha-1", "Urea 100 kg N/ha"),
+  to   = c("Urea|100", "Urea|100")
+)
+
+xmap <- nma_apply_mapping(
+  xb,
+  mapping = map,
+  reviewed = TRUE,
+  reason = "Dose, source and route were verified as identical in the full reports"
+)
+```
+
+The `reviewed = TRUE` requirement is intentional friction. It prevents a fuzzy-string routine from becoming an undocumented scientific classifier.
+
+# 11. Fine/coarse node dictionary
+
+```{r}
+nit <- nma_data_example("agro_nitrogen")
+node_dict <- data.frame(
+  label = unique(nit$treatment),
+  fine = paste0(unique(nit$treatment), "|", c(0, 100, 100, 100, 100)),
+  coarse = c("No N", "Urea", "Ammonium sulfate", "Urea", "Organic N")
+)
+
+xn <- nma_data(nit, study = "study", treatment = "treatment", arm = "arm")
+xn <- nma_node_policy(xn, node_dict, reviewed = TRUE,
+                      reason = "Primary network compares N-source families; formulation retained in fine node")
+
+nma_network(xn, node = "coarse")
+nma_network(xn, node = "fine")
+```
+
+Use the coarse network for a primary estimand only if the collapsed interventions are sufficiently exchangeable for that question. Use the fine network to expose heterogeneity and to support dose/formulation sensitivity.
+
+# 12. Duplicate rows: quarantine, do not erase
+
+```{r}
+dup <- rbind(dat, dat[1, ])
+xd <- nma_data(dup, study = "study", treatment = "treatment", arm = "arm")
+xd2 <- nma_repair(xd, quarantine_exact_duplicates = TRUE)
+
+nma_quarantine(xd2)
+nma_audit(xd2)
+```
+
+Quarantine preserves provenance. A duplicate may represent a real data problem, a repeated publication, or an intentionally repeated record. The analyst should be able to inspect it after repair.
+
+# 13. Unit incompatibility
+
+Do not relabel units without transforming values.
+
+```{r}
+# Suppose mean is recorded in kg/ha for one subset and t/ha elsewhere.
+xu <- nma_convert_units(
+  x_units,
+  value = "mean",
+  unit = "unit",
+  from = "kg ha-1",
+  to = "t ha-1",
+  multiplier = 0.001,
+  reviewed = TRUE,
+  reason = "Physical unit conversion verified from source extraction"
+)
+```
+
+If SD, SE, CI limits, or other scale-dependent quantities are present, convert those consistently as separate audited fields. A mean-only conversion with an unconverted SD is invalid.
+
+# 14. Multiple outcomes and time points
+
+```{r}
+strata <- nma_split_strata(x_multi, by = c("outcome", "time", "unit"))
+names(strata)
+```
+
+Do not automatically choose one time point unless the protocol defines it. Do not combine outcomes because their labels are similar. The estimand determines whether stratification, multivariate NMA, or time-course NMA is appropriate.
+
+# 15. Detect disconnected components
+
+```{r}
+xdisc <- nma_data(disconnected_data, study = "study", treatment = "treatment", arm = "arm")
+plan <- nma_reconnect_plan(xdisc)
+plan
+```
+
+The reconnect plan can highlight suspicious near-duplicate labels across components. It cannot create a valid bridge. A true disconnected network requires separate NMAs, a different estimand/node policy justified by science, or additional eligible evidence.
+
+# 16. Before/after repair report
+
+```{r}
+report <- nma_network_repair_report(xdisc, repaired_xdisc)
+report
+```
+
+Compare rows, nodes, edges, components, issue counts, audit actions, and quarantine contents. This report belongs in the reproducibility bundle.
+
+# 17. Missing dispersion is an architecture problem too
+
+```{r}
+nma_dispersion(n = 30, se = 0.20)
+nma_dispersion(n = 30, ci_lower = 5.1, ci_upper = 5.9)
+```
+
+Document the derivation route. If information is insufficient, preserve `NA` and define a sensitivity plan. Never make the network appear complete by assuming an SD of zero or copying an SD from another treatment without justification.
+
+# 18. Multi-arm reconstruction
+
+```{r}
+nma_multiarm_check(x)
+```
+
+All arms from the same randomized study must carry the same study identifier. If a report gives three arms but extraction created three pseudo-studies, repair the study identity from the source before computing contrasts.
+
+# 19. Repeated reports of one study
+
+A publication is not necessarily a study. Multiple papers can report the same field experiment, site-year, or trial. The extraction layer should maintain a stable study ID and report ID separately when needed. If two reports contribute non-overlapping outcomes or times, preserve them without double-counting participants or plots.
+
+# 20. Population/context as a node-formation safeguard
+
+A treatment name can be identical across very different agronomic contexts. If effect modification by soil class, crop species, irrigation regime, or production system is plausible, decide before pooling whether the network targets one context, several strata, or a meta-regression/ML-NMR estimand.
+
+# 21. Automated repair policy
+
+Safe by default:
+
+- whitespace trimming;
+- case/punctuation normalization that preserves identity;
+- exact duplicate quarantine;
+- explicit reviewed mapping;
+- explicit reviewed unit conversion;
+- explicit stratification;
+- node dictionary application after review.
+
+Never automatic:
+
+- semantic merging based only on string similarity;
+- collapsing doses, formulations, routes, or combinations;
+- combining time points or outcomes;
+- inventing a reference/control arm;
+- linking disconnected components with synthetic edges;
+- imputing missing uncertainty without a declared model.
+
+# 22. Network-formation checklist
+
+- [ ] study IDs represent randomized/observational units, not publication rows;
+- [ ] all arms of each multi-arm study share the same study ID;
+- [ ] treatment labels preserve formulation, dose, route, timing and components where relevant;
+- [ ] fine/coarse node dictionary is protocol-aligned;
+- [ ] outcome definition and direction are harmonized;
+- [ ] units and scale-dependent uncertainty are converted consistently;
+- [ ] time point and population are explicit;
+- [ ] duplicate extraction and duplicate publication are distinguished;
+- [ ] single-arm rows are either scientifically expected or quarantined;
+- [ ] missing SD/SE is documented;
+- [ ] disconnected components are explained;
+- [ ] every substantive mapping has a reason and reviewer decision;
+- [ ] post-repair geometry is compared with the original.
+
+# 23. Integrated repair example
+
+```{r}
+raw <- read.csv("extracted_trials.csv")
+x0 <- nma_data(raw, study = "study_id", treatment = "intervention", arm = "arm_id",
+               outcome = "outcome", time = "timepoint", unit = "unit")
+
+v0 <- nma_validate(x0, n = "n", mean = "mean", sd = "sd", se = "se")
+net0 <- nma_network(x0)
+
+# Safe mechanical normalization only.
+x1 <- nma_repair(x0, trim_whitespace = TRUE,
+                 normalize_equivalent_spelling = TRUE,
+                 quarantine_exact_duplicates = TRUE)
+
+# Human-reviewed scientific classification.
+x2 <- nma_node_policy(x1, reviewed_node_dictionary,
+                      reviewed = TRUE,
+                      reason = "Protocol-defined intervention taxonomy v2")
+
+# Split incompatible estimands.
+sets <- nma_split_strata(x2, by = c("outcome", "timepoint", "unit"))
+
+# For each stratum, repeat validation and preflight.
+pre <- lapply(sets, nma_preflight)
+
+# Save evidence trail.
+nma_reproduce(x2, "network_architecture_bundle")
+```
+
+# 24. Interpretation template for a manuscript
+
+Report the source data format; how studies and multi-arm trials were identified; the node taxonomy; whether dose/formulation details were collapsed; outcome/time/unit rules; duplicate and quarantine rules; dispersion recovery; connected-component status before and after harmonization; and all deviations from the prespecified node policy.
+
+# Final perspective
+
+A disconnected network is not automatically defective, and a connected network is not automatically valid. The objective of `nmaFlow` architecture tools is to maximize **traceable scientific correctness**, not to maximize the number of connected treatments.
