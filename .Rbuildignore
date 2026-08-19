@@ -1,7 +1,8 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^\.github$
 ^validation$
 ^tools$
 ^README_DEV\.md$
-
-^inst/doc$
+^IMPLEMENTATION_REPORT\.md$
+^_pkgdown\.yml$

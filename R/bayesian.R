@@ -100,8 +100,14 @@ nma_pp_check <- function(fit, type = c("dic", "loo", "waic", "summary"), ...) {
   type <- match.arg(type)
   switch(type,
     dic = multinma::dic(fit$fit, ...),
-    loo = multinma::loo(fit$fit, ...),
-    waic = multinma::waic(fit$fit, ...),
+    loo = {
+      .nma_require("loo", "LOO-CV model comparison")
+      loo::loo(fit$fit, ...)
+    },
+    waic = {
+      .nma_require("loo", "WAIC model comparison")
+      loo::waic(fit$fit, ...)
+    },
     summary = summary(fit$fit, ...)
   )
 }

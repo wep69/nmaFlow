@@ -30,6 +30,7 @@ Suggests:
     meta,
     NMA,
     multinma,
+    loo,
     gemtc,
     rjags,
     nmaINLA,
