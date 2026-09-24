@@ -90,6 +90,18 @@ test_that("nma_threshold identifies nma_thresh and validates inputs", {
     nma_threshold(structure(list(), class = "nmaflow_fit")),
     "mean.dk"
   )
+  n <- 6
+  k <- 3
+  X <- cbind(x1 = rep(c(0, 1), each = n / 2), x2 = rep(c(0, 1), times = n / 2))
+  lhood <- diag(n)
+  post <- diag(k - 1)
+  thresh <- nma_threshold(
+    NULL,
+    mean.dk = c(0.1, 0.2), lhood = lhood, post = post,
+    X = X, nmatype = "fixed", mcid = 0, mcid.type = "change"
+  )
+  expect_s3_class(thresh, "thresh")
+  expect_true(all(c("thresholds", "U", "Ukstar") %in% names(thresh)))
 })
 
 test_that("nma_predict reports unsupported netmeta backend clearly", {
