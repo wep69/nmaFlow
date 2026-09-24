@@ -26,6 +26,6 @@ jobs:
         shell: Rscript {0}
       - uses: r-lib/actions/check-r-package@v2
         with:
-          build_args: '--no-build-vignettes'
+          build_args: '"--no-build-vignettes"'
           args: ${{ matrix.config.args }}
           upload-snapshots: true
