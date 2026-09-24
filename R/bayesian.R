@@ -75,6 +75,7 @@ nma_fit_bayes <- function(network, consistency = c("consistency", "ume", "nodesp
   if (!is.null(prior_reg)) args$prior_reg <- prior_reg
   args <- c(args, list(...))
   fit <- do.call(multinma::nma, args)
+  .nma_check_backend_result(fit, "multinma model")
   framework <- if (consistency == "nodesplit") "bayesian_nodesplit" else "bayesian"
   .nma_new("nmaflow_fit", engine = "multinma", framework = framework, fit = fit,
            network = network, specification = list(consistency = consistency, trt_effects = trt_effects,

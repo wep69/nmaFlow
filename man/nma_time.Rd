@@ -4,14 +4,16 @@
 \alias{nma_time}
 \title{Fit a Bayesian time-course Model-Based NMA}
 \usage{
-nma_time(data, fun, method = "random", ...)
+nma_time(data, fun, method = "random", reference = NULL, ...)
 }
 \arguments{
 \item{data}{Arm-level data in MBNMAtime format.}
 
 \item{fun}{A time-course function object accepted by \code{MBNMAtime::mb.run()}.}
 
-\item{method}{Common/random setting passed to MBNMAtime.}
+\item{method}{Common/random setting recorded for the nmaFlow object.}
+
+\item{reference}{Optional reference treatment for MBNMAtime when treatments are character labels.}
 
 \item{...}{Additional arguments to \code{MBNMAtime::mb.run()}.}
 }

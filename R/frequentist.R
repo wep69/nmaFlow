@@ -53,12 +53,18 @@ nma_fit_nma <- function(x, measure = c("MD", "SMD", "OR", "RR", "RD", "HR", "SPD
   if (x$format != "arm") stop("NMA::setup requires arm-level data.", call. = FALSE)
   d <- x$data; st <- x$mapping$study; tr <- x$mapping$treatment
   .nma_assert_cols(d, c(st, tr, event, total, mean, sd, n, covariates))
-  args <- list(study = d[[st]], trt = d[[tr]], measure = measure, ref = ref, data = d)
-  if (!is.null(event)) args$d <- d[[event]]
-  if (!is.null(total)) args$n <- d[[total]]
-  if (!is.null(mean)) args$m <- d[[mean]]
-  if (!is.null(sd)) args$s <- d[[sd]]
-  if (!is.null(covariates)) args$z <- d[covariates]
+  args <- list(
+    study = as.name(st), trt = as.name(tr), measure = measure,
+    ref = ref, data = d
+  )
+  if (!is.null(event)) args$d <- as.name(event)
+  if (!is.null(total)) args$n <- as.name(total)
+  if (!is.null(mean)) args$m <- as.name(mean)
+  if (!is.null(sd)) args$s <- as.name(sd)
+  if (!is.null(n)) args$n <- as.name(n)
+  if (!is.null(covariates)) {
+    args$z <- as.call(c(list(as.name("c")), lapply(covariates, function(v) v)))
+  }
   setup <- do.call(NMA::setup, args)
   fit <- NMA::nma(setup, eform = eform, method = method)
   .nma_new("nmaflow_fit", engine = "NMA", framework = "frequentist", fit = fit,
@@ -108,6 +114,9 @@ nma_contribution <- function(fit, ...) {
 #' @export
 nma_predict <- function(fit, ...) {
   if (!inherits(fit, "nmaflow_fit")) stop("Expected `nmaflow_fit`.", call. = FALSE)
+  if (fit$engine == "netmeta") {
+    stop("Prediction is not available for netmeta fits. Use `nma_league()`, `nma_inconsistency()` or a backend with prediction support.", call. = FALSE)
+  }
   stats::predict(fit$fit, ...)
 }
 

@@ -98,7 +98,17 @@ nma_table <- function(x, component = c("summary", "audit", "issues", "network", 
     network = { n <- if (inherits(x, "nmaflow_network")) x else nma_network(x); n$edges },
     effects = if (inherits(x, "nmaflow_effects")) x$data else stop("Use an nmaflow_effects object.", call. = FALSE),
     bootstrap = if (inherits(x, "nmaflow_boot")) x$ci else stop("Use an nmaflow_boot object.", call. = FALSE),
-    rank = as.data.frame(nma_rank(x, ...)),
+    rank = {
+      r <- nma_rank(x, ...)
+      if (inherits(r, "netrank")) {
+        v <- r$Pscore.random %||% r$Pscore.common %||% r$Pscore.fixed
+        if (is.character(v)) v <- r$Pscore.random
+        if (is.null(v) || is.character(v)) stop("Could not extract numeric P-scores from the netmeta ranking object.", call. = FALSE)
+        data.frame(treatment = names(v), P.score = as.numeric(v), stringsAsFactors = FALSE)
+      } else {
+        as.data.frame(r)
+      }
+    },
     league = as.data.frame(nma_league(x, ...)),
     summary = {
       if (inherits(x, "nmaflow_fit")) {

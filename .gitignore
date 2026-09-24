@@ -21,6 +21,11 @@ logs/
 IMPLEMENTATION_REPORT.md
 _pkgdown.yml
 
+# Internal planning
+task_plan.md
+findings.md
+progress.md
+
 # OS
 Thumbs.db
 .DS_Store

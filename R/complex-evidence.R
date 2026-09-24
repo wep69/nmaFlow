@@ -21,16 +21,21 @@ nma_component <- function(fit, inactive = NULL, sep_components = "+", ...) {
 #'
 #' @param data Arm-level data in MBNMAtime format.
 #' @param fun A time-course function object accepted by `MBNMAtime::mb.run()`.
-#' @param method Common/random setting passed to MBNMAtime.
+#' @param method Common/random setting recorded for the nmaFlow object.
+#' @param reference Optional reference treatment for MBNMAtime when treatments are character labels.
 #' @param ... Additional arguments to `MBNMAtime::mb.run()`.
 #' @return An `nmaflow_fit` object.
 #' @export
-nma_time <- function(data, fun, method = "random", ...) {
+nma_time <- function(data, fun, method = "random", reference = NULL, ...) {
   .nma_require("MBNMAtime", "time-course NMA")
-  net <- MBNMAtime::mb.network(data)
-  fit <- MBNMAtime::mb.run(net, fun = fun, method = method, ...)
+  method <- match.arg(method, c("common", "random"))
+  if (is.null(reference) && "treatment" %in% names(data) && is.character(data[["treatment"]])) {
+    reference <- unique(data[["treatment"]])[1L]
+  }
+  net <- MBNMAtime::mb.network(data, reference = reference)
+  fit <- MBNMAtime::mb.run(net, fun = fun, ...)
   .nma_new("nmaflow_fit", engine = "MBNMAtime", framework = "bayesian_time",
-           fit = fit, network = net, data = data, specification = list(method = method))
+           fit = fit, network = net, data = data, specification = list(method = method, reference = reference))
 }
 
 #' Create a multinma network from individual-level data
@@ -86,9 +91,20 @@ nma_mlnmr <- function(ipd_network, agd_network, reference = NULL, integration = 
 #' @export
 nma_crossdesign <- function(..., run = TRUE, run_args = list()) {
   .nma_require("crossnma", "cross-design/cross-format NMA")
-  model <- crossnma::crossnma.model(...)
+  model_args <- list(...)
+  required <- c("trt", "study", "outcome", "n", "design")
+  if (any(!required %in% names(model_args))) {
+    stop("`nma_crossdesign()` requires named arguments passed to crossnma::crossnma.model(), including trt, study, outcome, n and design.", call. = FALSE)
+  }
+  for (nm in intersect(c("trt", "study", "outcome", "n", "design", "se"), names(model_args))) {
+    if (is.character(model_args[[nm]]) && length(model_args[[nm]]) == 1L) {
+      model_args[[nm]] <- as.name(model_args[[nm]])
+    }
+  }
+  model <- do.call(crossnma::crossnma.model, model_args)
   if (!isTRUE(run)) return(model)
-  fit <- do.call(crossnma::crossnma, c(list(model), run_args))
+  fit_args <- c(list(x = model), run_args)
+  fit <- do.call(crossnma::crossnma, fit_args)
   .nma_new("nmaflow_fit", engine = "crossnma", framework = "bayesian_crossdesign",
            fit = fit, model = model, specification = list(call = match.call()))
 }
@@ -105,10 +121,12 @@ nma_crossdesign <- function(..., run = TRUE, run_args = list()) {
 nma_multivariate <- function(y, S, formula = NULL, data = NULL, ...) {
   .nma_require("mixmeta", "multivariate NMA building block")
   if (is.null(formula)) {
-    fit <- mixmeta::mixmeta(y, S = S, data = data, ...)
-  } else {
-    fit <- mixmeta::mixmeta(formula, S = S, data = data, ...)
+    if (is.null(data)) {
+      data <- if (!is.null(dim(y))) data.frame(.nma_y = I(y)) else data.frame(.nma_y = y)
+    }
+    formula <- .nma_y ~ 1
   }
+  fit <- mixmeta::mixmeta(formula, S = S, data = data, ...)
   .nma_new("nmaflow_fit", engine = "mixmeta", framework = "multivariate", fit = fit,
            specification = list(call = match.call()))
 }

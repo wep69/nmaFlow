@@ -33,7 +33,19 @@ nma_dose <- function(data, framework = c("bayesian", "frequentist"),
   framework <- match.arg(framework)
   if (framework == "frequentist") {
     .nma_require("netdose", "frequentist dose-response NMA")
-    args <- c(list(data = data, method = model), list(...))
+    .nma_assert_data(data)
+    required <- c("TE", "seTE", "agent1", "dose1", "agent2", "dose2", "studlab")
+    .nma_assert_cols(data, required, "dose contrast data")
+    args <- list(
+      TE = data[["TE"]], seTE = data[["seTE"]],
+      agent1 = data[["agent1"]], dose1 = data[["dose1"]],
+      agent2 = data[["agent2"]], dose2 = data[["dose2"]],
+      studlab = data[["studlab"]], sm = data[["sm"]] %||% "MD",
+      method = model
+    )
+    dots <- list(...)
+    dots$data <- NULL
+    args <- c(args, dots)
     fit <- do.call(netdose::netdose, args)
     return(.nma_new("nmaflow_fit", engine = "netdose", framework = "frequentist_dose",
                     fit = fit, data = data, specification = list(model = model)))

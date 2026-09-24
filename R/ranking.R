@@ -87,8 +87,17 @@ nma_utility <- function(estimates, treatment, criteria, weights,
 nma_threshold <- function(fit, ...) {
   .nma_require("nmathresh", "NMA decision threshold analysis")
   funs <- getNamespaceExports("nmathresh")
-  cand <- intersect(c("nmathresh", "threshold", "thresholds"), funs)
-  if (!length(cand)) stop("Could not identify an exported threshold entry function in the installed nmathresh version.", call. = FALSE)
+  cand <- intersect(c("nma_thresh", "nmathresh", "threshold", "thresholds"), funs)
+  if (!length(cand)) {
+    stop("The installed nmathresh version does not export a supported threshold entry function. Available exports: ", paste(funs, collapse = ", "), call. = FALSE)
+  }
   obj <- if (inherits(fit, "nmaflow_fit")) fit$fit else fit
+  args <- list(...)
+  if (cand[[1L]] == "nma_thresh") {
+    if (!all(c("mean.dk", "lhood", "post") %in% names(args))) {
+      stop("`nma_threshold()` with nmathresh requires `mean.dk`, `lhood` and `post` through `...`.", call. = FALSE)
+    }
+    return(do.call(nmathresh::nma_thresh, args))
+  }
   getExportedValue("nmathresh", cand[[1L]])(obj, ...)
 }

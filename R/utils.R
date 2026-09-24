@@ -10,6 +10,23 @@
   invisible(TRUE)
 }
 
+.nma_check_backend_result <- function(x, label = "backend") {
+  engine <- if (is.list(x)) x$engine else NULL
+  if (is.character(engine) && length(engine) == 1L && grepl("failed|error", engine, ignore.case = TRUE)) {
+    stop(sprintf("%s failed: %s", label, engine), call. = FALSE)
+  }
+  if (inherits(x, "nma_nodesplit_df") && !is.null(x$model)) {
+    valid <- vapply(x$model, function(z) {
+      s <- z$stanfit
+      inherits(s, "stanfit") && !is.null(s@sim$fnames_oi) && length(s@sim$fnames_oi) > 0L
+    }, logical(1))
+    if (any(!valid)) {
+      stop(sprintf("%s failed: one or more node-split Stan models contain no posterior samples.", label), call. = FALSE)
+    }
+  }
+  invisible(x)
+}
+
 .nma_assert_data <- function(data) {
   if (!is.data.frame(data)) stop("`data` must be a data.frame.", call. = FALSE)
   if (!nrow(data)) stop("`data` has zero rows.", call. = FALSE)

@@ -6,3 +6,6 @@
 ^README_DEV\.md$
 ^IMPLEMENTATION_REPORT\.md$
 ^_pkgdown\.yml$
+^task_plan\.md$
+^findings\.md$
+^progress\.md$
